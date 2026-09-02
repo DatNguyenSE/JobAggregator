@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="JobAggregator.BusinessLogic/JobAggregator.BusinessLogic.csproj" />
+  <Project Path="JobAggregator.DataAccess/JobAggregator.DataAccess.csproj" />
+  <Project Path="JobAggregator.Presentation/JobAggregator.Presentation.csproj" />
+</Solution>

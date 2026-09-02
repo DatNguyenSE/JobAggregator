@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  JobAggregatorMVP
+  Kiến trúc Serverless Job Aggregator (API Gateway, Lambda, SQS, S3, Bedrock)
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: dotnet8 # Sử dụng dotnet8 vì AWS Lambda khu vực này chưa hỗ trợ dotnet10 mặc định
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        DB_CONNECTION_STRING: "Host=aws-0-ap-southeast-1.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.yyfjnfvukjipbfunruxz;Password=Dat6112005nt!;SSL Mode=Require;Trust Server Certificate=true;Pooling=false;"
+
+Resources:
+  # 1. API Gateway (Cấu hình sẵn CORS cho Angular Frontend gọi vào)
+  JobAggregatorApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'" # Trong thực tế, bạn nên thay bằng domain của Angular App để bảo mật
+
+  # 2. Amazon SQS - Hàng đợi 1: Scraping Queue (Chờ cào dữ liệu)
+  ScrapingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: job-aggregator-scraping-queue
+      VisibilityTimeout: 300 # Đợi Lambda cào xong (Tối đa 300s - 5 phút)
+
+  # 3. Amazon SQS - Hàng đợi 2: AI Processing Queue (Chờ AI bóc tách)
+  AIProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: job-aggregator-ai-processing-queue
+      VisibilityTimeout: 120 # Đợi Bedrock và xử lý ảnh (Tối đa 120s)
+
+  # 4. Amazon S3 - Kho chứa HTML thô và Ảnh trước khi đưa cho AI
+  RawDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "job-aggregator-raw-data-${AWS::AccountId}-${AWS::Region}"
+
+  # 5. Lambda: User API (Luồng 1) - Tiếp nhận HTTP Request và tìm DB, hoặc đẩy SQS
+  UserApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./JobAggregator.Presentation/
+      Handler: JobAggregator.Presentation
+      Environment:
+        Variables:
+          SCRAPING_QUEUE_URL: !Ref ScrapingQueue
+      Policies:
+        # IAM Policy 1: Cho phép User API gửi tin nhắn vào Scraping Queue
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt ScrapingQueue.QueueName
+      Events:
+        SearchJobsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref JobAggregatorApi
+            Path: /api/jobs/search
+            Method: POST
+
+  # 6. Lambda: Data Fetcher (Luồng 2) - Cào dữ liệu -> Lưu S3 -> Đẩy sang AI Queue
+  DataFetcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./JobAggregator.Presentation/
+      Handler: JobAggregator.Presentation::JobAggregator.Presentation.Functions::DataFetcherHandler
+      Timeout: 300
+      Environment:
+        Variables:
+          RAW_DATA_BUCKET: !Ref RawDataBucket
+          AI_PROCESSING_QUEUE_URL: !Ref AIProcessingQueue
+          TINYFISH_API_KEY: "sk-tinyfish-4mU-mWX4yf8MzBHOt8NiYDscM8_McxPi"
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt ScrapingQueue.QueueName
+        # IAM Policy 2: Cho phép lưu file (HTML/Image) lên S3
+        - S3CrudPolicy:
+            BucketName: !Ref RawDataBucket
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AIProcessingQueue.QueueName
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ScrapingQueue.Arn
+            BatchSize: 1
+
+  # 7. Lambda: AI Processor (Luồng 3) - Lấy data từ S3 -> Gọi Bedrock -> Lưu DB
+  AIProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./JobAggregator.Presentation/
+      Handler: JobAggregator.Presentation::JobAggregator.Presentation.Functions::AIProcessorHandler
+      Timeout: 120
+      # Đã xóa ReservedConcurrentExecutions vì giới hạn của tài khoản AWS mới.
+      Environment:
+        Variables:
+          RAW_DATA_BUCKET: !Ref RawDataBucket
+          WEBSOCKET_ENDPOINT: !Sub "https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt AIProcessingQueue.QueueName
+        # IAM Policy 3: Cho phép đọc file từ S3
+        - S3ReadPolicy:
+            BucketName: !Ref RawDataBucket
+        # IAM Policy 4: Custom policy cho phép gọi Amazon Bedrock (Claude 3 Haiku)
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: "*"
+        # IAM Policy 5: Cho phép gọi ngược lại API Gateway WebSockets
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/Prod/POST/@connections/*"
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AIProcessingQueue.Arn
+            BatchSize: 1 # Mỗi lần AI chỉ bóc tách 1 Job để tối ưu xử lý và dễ debug
+
+  # 8. WebSocket API Gateway V2
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: JobAggregatorWebSocket
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref ConnectIntegration
+
+  ConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      Description: Connect Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: 
+        Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketConnectFunction.Arn}/invocations
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref DisconnectIntegration
+
+  DisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      Description: Disconnect Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: 
+        Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDisconnectFunction.Arn}/invocations
+
+  WebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+    - ConnectRoute
+    - DisconnectRoute
+    Properties:
+      ApiId: !Ref WebSocketApi
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: Prod
+      Description: Prod Stage
+      DeploymentId: !Ref WebSocketDeployment
+      ApiId: !Ref WebSocketApi
+
+  # 9. Lambda: WebSocket Connect Handler
+  WebSocketConnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./JobAggregator.Presentation/
+      Handler: JobAggregator.Presentation::JobAggregator.Presentation.WebSocketFunctions::ConnectHandler
+
+  ConnectFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - WebSocketApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketConnectFunction
+      Principal: apigateway.amazonaws.com
+
+  # 10. Lambda: WebSocket Disconnect Handler
+  WebSocketDisconnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./JobAggregator.Presentation/
+      Handler: JobAggregator.Presentation::JobAggregator.Presentation.WebSocketFunctions::DisconnectHandler
+
+  DisconnectFunctionPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - WebSocketApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketDisconnectFunction
+      Principal: apigateway.amazonaws.com
+
+Outputs:
+  ApiEndpoint:
+    Description: "URL gốc của API Gateway (REST) để cấu hình HTTP Client"
+    Value: !Sub "https://${JobAggregatorApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  WebSocketEndpoint:
+    Description: "URL của WebSocket API Gateway để cấu hình vào Frontend Angular"
+    Value: !Sub "wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"

@@ -1,0 +1,6 @@
+@JobAggregator.Presentation_HostAddress = http://localhost:5233
+
+GET {{JobAggregator.Presentation_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
