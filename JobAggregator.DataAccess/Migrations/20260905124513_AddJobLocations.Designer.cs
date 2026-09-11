@@ -3,6 +3,7 @@ using System;
 using JobAggregator.DataAccess.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace JobAggregator.DataAccess.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260905124513_AddJobLocations")]
+    partial class AddJobLocations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -33,7 +36,8 @@ namespace JobAggregator.DataAccess.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.Property<string>("ExactAddress")
-                        .HasColumnType("text");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<Guid>("JobPostId")
                         .HasColumnType("uuid");
@@ -67,7 +71,8 @@ namespace JobAggregator.DataAccess.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("EmployerName")
-                        .HasColumnType("text");
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<string>("Experience")
                         .HasColumnType("text");
@@ -84,9 +89,6 @@ namespace JobAggregator.DataAccess.Migrations
 
                     b.Property<string>("JobInfo")
                         .HasColumnType("text");
-
-                    b.Property<DateTime?>("LastScrapedAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Location")
                         .HasColumnType("text");
@@ -138,34 +140,6 @@ namespace JobAggregator.DataAccess.Migrations
                         .IsUnique();
 
                     b.ToTable("JobPosts");
-                });
-
-            modelBuilder.Entity("JobAggregator.DataAccess.Entities.JobSearchRequest", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CriteriaJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Message")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("JobSearchRequests");
                 });
 
             modelBuilder.Entity("JobAggregator.DataAccess.Entities.SearchKeyword", b =>

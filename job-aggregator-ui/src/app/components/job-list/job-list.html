@@ -1,0 +1,140 @@
+<div class="job-container">
+  <div class="header-section">
+   
+  </div>
+  
+  <div class="search-panel">
+    <div class="search-row">
+      <div class="input-wrapper">
+        <span class="search-icon">🔍</span>
+        <input type="text" [(ngModel)]="criteria.Keyword" placeholder="Nhập từ khóa (vd: Phục vụ, Pha chế)..." (keyup.enter)="searchJobs()">
+      </div>
+      <div class="input-wrapper">
+        <span class="search-icon">📍</span>
+        <select [(ngModel)]="selectedProvince" (change)="onProvinceChange()">
+          <option value="">-- Chọn Tỉnh / Thành phố (Không bắt buộc) --</option>
+          <option *ngFor="let p of provinces" [value]="p.province">{{ p.province }}</option>
+        </select>
+      </div>
+      <div class="input-wrapper" *ngIf="selectedProvince">
+        <span class="search-icon">🏢</span>
+        <select [(ngModel)]="selectedDistrict">
+          <option value="">-- Chọn Quận / Huyện (Không bắt buộc) --</option>
+          <option *ngFor="let d of districts" [value]="d">{{ d }}</option>
+        </select>
+      </div>
+      <div class="input-wrapper select-wrapper">
+        <span class="search-icon">💼</span>
+        <select [(ngModel)]="criteria.JobType">
+          <option value="">Tất cả hình thức</option>
+          <option value="Part-time">Part-time (Bán thời gian)</option>
+          <option value="Full-time">Full-time (Toàn thời gian)</option>
+          <option value="Sinh viên">Việc làm sinh viên</option>
+        </select>
+      </div>
+    </div>
+    
+    <div class="sources-row">
+      <span class="sources-label">Cào dữ liệu từ:</span>
+      <label class="source-checkbox"><input type="checkbox" [(ngModel)]="sources.chotot"> Chợ Tốt</label>
+      <label class="source-checkbox"><input type="checkbox" [(ngModel)]="sources.facebook"> Facebook Groups</label>
+      <label class="source-checkbox"><input type="checkbox" [(ngModel)]="sources.vieclam24h"> Việc Làm 24h</label>
+      <label class="source-checkbox"><input type="checkbox" [(ngModel)]="sources.topcv"> TopCV</label>
+    </div>
+
+    <div class="limit-selector-row" style="margin-top: 15px; display: flex; align-items: center; gap: 15px;">
+      <span class="sources-label" style="font-weight: 600; color: #1e293b;">Số lượng Job tối đa: </span>
+      <span style="font-weight: bold; color: #ef4444; width: 30px;">{{ criteria.MaxJobs }}</span>
+      <input type="range" min="1" max="20" step="1" [(ngModel)]="criteria.MaxJobs" style="flex: 1; max-width: 200px; cursor: pointer;">
+    </div>
+
+    <button class="search-btn" (click)="searchJobs()" [disabled]="isLoading" [class.loading-btn]="isLoading" style="margin-top: 20px;">
+      <span *ngIf="!isLoading">Tìm việc ngay</span>
+      <span *ngIf="isLoading" class="spinner"></span>
+    </button>
+  </div>
+
+  <!-- Loading State & AI Status -->
+  <div *ngIf="isLoading" class="ai-status-card">
+    <div class="radar-spinner"></div>
+    <div class="status-text">
+      <h4>Đang quét mạng lưới</h4>
+      <p class="animated-dots">{{ message }}</p>
+    </div>
+  </div>
+
+  <!-- Error State -->
+  <div *ngIf="message && !isLoading" class="error-alert">
+    {{ message }}
+  </div>
+
+  <!-- Job List -->
+  <div class="job-list" *ngIf="jobs.length > 0">
+    <div class="job-card" *ngFor="let job of jobs" [class.expanded]="expandedJobIds.has(job.id)">
+      <div class="card-header" style="cursor: pointer;" (click)="toggleJob(job.id)">
+        <h3>{{ job.title }}</h3>
+        <span class="platform-badge">{{ job.platform || 'Unknown' }}</span>
+        <span class="expand-icon" style="margin-left: auto; font-size: 1.2rem;">{{ expandedJobIds.has(job.id) ? '▲' : '▼' }}</span>
+      </div>
+      
+      <div class="job-meta" style="cursor: pointer;" (click)="toggleJob(job.id)">
+        <span class="meta-item location"><i class="icon">📍</i> {{ job.location || 'Bất kỳ đâu' }}</span>
+        <span class="meta-item salary"><i class="icon">💰</i> {{ job.salaryInfo || 'Lương thỏa thuận' }}</span>
+      </div>
+      
+      <div class="card-body" *ngIf="expandedJobIds.has(job.id)">
+        <div class="employer-info" *ngIf="job.employerName || job.contactPhone || job.locations">
+          <p *ngIf="job.employerName"><strong>🏢 Nơi làm:</strong> {{ job.employerName }}</p>
+          
+          <div *ngIf="job.locations && job.locations.length > 0" style="margin: 8px 0;">
+            <div class="info-row">
+              <strong>📍 Địa chỉ:</strong>
+              <ul style="margin: 4px 0 0 20px; padding: 0;">
+                <li *ngFor="let loc of job.locations" class="location-badge">
+                  {{ loc.exactAddress ? loc.exactAddress : (loc.district ? loc.district + ', ' + loc.province : loc.province) }}
+                </li>
+              </ul>
+            </div>
+          </div>
+          <p *ngIf="job.contactPhone"><strong>📞 Liên hệ:</strong> <a [href]="'tel:' + job.contactPhone" style="color: #4b6bfb; font-weight: bold;">{{ job.contactPhone }}</a></p>
+          <hr style="border: 0; border-top: 1px dashed #e2e8f0; margin: 10px 0;">
+        </div>
+        
+        <div class="general-info-container" style="background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+          <h4 style="margin: 0 0 10px 0; color: #334155; font-size: 1rem;">📋 Thông tin chung</h4>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9rem;">
+            <div *ngIf="job.gender"><span style="color: #64748b;">Giới tính:</span> <strong>{{ job.gender }}</strong></div>
+            <div *ngIf="job.vacancies"><span style="color: #64748b;">Số lượng tuyển:</span> <strong>{{ job.vacancies }}</strong></div>
+            <div *ngIf="job.workingFormat"><span style="color: #64748b;">Hình thức:</span> <strong>{{ job.workingFormat }}</strong></div>
+            <div *ngIf="job.ageRequirement"><span style="color: #64748b;">Độ tuổi:</span> <strong>{{ job.ageRequirement }}</strong></div>
+            <div *ngIf="job.experience"><span style="color: #64748b;">Kinh nghiệm:</span> <strong>{{ job.experience }}</strong></div>
+          </div>
+        </div>
+
+        <p class="requirements" *ngIf="job.jobInfo" style="white-space: pre-wrap;"><strong>📜 Mô tả công việc:</strong><br>{{ job.jobInfo }}</p>
+        <p class="requirements" *ngIf="job.requirements" style="white-space: pre-wrap;"><strong>🎯 Yêu cầu ứng viên:</strong><br>{{ job.requirements }}</p>
+        
+        <div class="benefits-container" *ngIf="job.otherBenefits || job.holidayBonuses">
+          <strong>💎 Phúc lợi:</strong>
+          <ul class="benefits-list">
+            <li *ngIf="job.holidayBonuses">{{ job.holidayBonuses }}</li>
+            <li *ngIf="job.otherBenefits" style="white-space: pre-wrap;">{{ job.otherBenefits }}</li>
+          </ul>
+        </div>
+        
+        <div class="card-footer" style="margin-top: 15px; text-align: right; border-top: 1px solid #f1f5f9; padding-top: 15px;">
+          <a *ngIf="job.sourceUrl" [href]="job.sourceUrl" target="_blank" class="apply-btn" style="background: #eff6ff; color: #2563eb; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; display: inline-block; font-size: 0.9rem; border: 1px solid #bfdbfe; transition: all 0.2s;">
+            🔗 Xem bài đăng gốc
+          </a>
+        </div>
+      </div>
+      
+      <div class="card-footer">
+        <div class="date-badge">
+          <i class="icon">📅</i> Đăng ngày: {{ job.postedDate | date:'dd/MM/yyyy' }}
+        </div>
+        <a class="apply-btn" [href]="job.sourceUrl || '#'" target="_blank">Ứng tuyển ngay</a>
+      </div>
+    </div>
+  </div>
+</div>

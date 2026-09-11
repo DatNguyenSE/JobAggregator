@@ -117,3 +117,5 @@ Network Trash Folder
 Temporary Items
 .apdisk
 template.yaml
+JobAggregator.Presentation/appsettings.json
+JobAggregator.Presentation/Properties/launchSettings.json

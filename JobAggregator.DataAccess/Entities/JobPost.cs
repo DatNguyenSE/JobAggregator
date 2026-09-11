@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 
 namespace JobAggregator.DataAccess.Entities
 {
@@ -14,10 +16,10 @@ namespace JobAggregator.DataAccess.Entities
         public string? Requirements { get; set; }
         public string? Location { get; set; }
         
-        // Thông tin nhà tuyển dụng & liên hệ
-        public string? EmployerName { get; set; }
+        public virtual ICollection<JobLocation> Locations { get; set; } = new List<JobLocation>();
+        
+        public string? EmployerName { get; set; } 
         public string? ContactPhone { get; set; }
-        public string? SpecificAddress { get; set; }
 
         // Thông tin thời gian làm việc
         public string? WorkingHours { get; set; } 
@@ -33,6 +35,14 @@ namespace JobAggregator.DataAccess.Entities
         public string ExternalId { get; set; } = null!; 
         
         public DateTime PostedDate { get; set; } 
-        public DateTime CreatedAt { get; set; } 
+        public DateTime CreatedAt { get; set; }
+        public DateTime? LastScrapedAt { get; set; } 
+
+        public string? JobInfo { get; set; }
+        public string? Gender { get; set; }
+        public int? Vacancies { get; set; }
+        public string? WorkingFormat { get; set; }
+        public string? AgeRequirement { get; set; }
+        public string? Experience { get; set; }
     }
 }

@@ -12,8 +12,8 @@ namespace JobAggregator.DataAccess
         public static IServiceCollection AddDataAccess(this IServiceCollection services, IConfiguration configuration)
         {
             // Lấy chuỗi kết nối từ cấu hình (Appsettings.json) hoặc Biến môi trường (AWS Lambda)
-            var connectionString = configuration.GetConnectionString("DefaultConnection") 
-                                   ?? Environment.GetEnvironmentVariable("DB_CONNECTION_STRING");
+            var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING")
+                                   ?? configuration.GetConnectionString("DefaultConnection");
 
             services.AddDbContext<AppDbContext>(options =>
                 options.UseNpgsql(connectionString));

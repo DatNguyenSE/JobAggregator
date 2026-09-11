@@ -1,12 +1,8 @@
-using System.Collections.Generic;
-using System.Threading.Tasks;
 using JobAggregator.BusinessLogic.DTOs;
-
-namespace JobAggregator.BusinessLogic.Services.Interfaces
+namespace JobAggregator.BusinessLogic.Services.Interfaces;
+public interface IJobSearchService
 {
-    public interface IJobSearchService
-    {
-        // Trả về tuple: (IsFound: có dữ liệu hay không, Jobs: danh sách công việc)
-        Task<(bool IsFound, IEnumerable<JobPostDto> Jobs)> SearchJobsAsync(SearchCriteriaDto criteria);
-    }
+    Task<JobSearchResponse> SearchJobsAsync(SearchCriteriaDto criteria);
+    Task<JobSearchResponse?> GetStatusAsync(Guid requestId);
+    Task FinishAsync(Guid? requestId, string? error = null);
 }

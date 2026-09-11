@@ -3,6 +3,7 @@ using System;
 using JobAggregator.DataAccess.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace JobAggregator.DataAccess.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260904174726_AddJobInfoFields")]
+    partial class AddJobInfoFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,35 +24,6 @@ namespace JobAggregator.DataAccess.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
-            modelBuilder.Entity("JobAggregator.DataAccess.Entities.JobLocation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("District")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("ExactAddress")
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("JobPostId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Province")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("JobPostId");
-
-                    b.HasIndex("Province", "District");
-
-                    b.ToTable("JobLocations");
-                });
 
             modelBuilder.Entity("JobAggregator.DataAccess.Entities.JobPost", b =>
                 {
@@ -85,9 +59,6 @@ namespace JobAggregator.DataAccess.Migrations
                     b.Property<string>("JobInfo")
                         .HasColumnType("text");
 
-                    b.Property<DateTime?>("LastScrapedAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("Location")
                         .HasColumnType("text");
 
@@ -114,6 +85,9 @@ namespace JobAggregator.DataAccess.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("SpecificAddress")
+                        .HasColumnType("text");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("text");
@@ -138,34 +112,6 @@ namespace JobAggregator.DataAccess.Migrations
                         .IsUnique();
 
                     b.ToTable("JobPosts");
-                });
-
-            modelBuilder.Entity("JobAggregator.DataAccess.Entities.JobSearchRequest", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CriteriaJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Message")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("JobSearchRequests");
                 });
 
             modelBuilder.Entity("JobAggregator.DataAccess.Entities.SearchKeyword", b =>
@@ -210,17 +156,6 @@ namespace JobAggregator.DataAccess.Migrations
                     b.ToTable("WebSocketConnections");
                 });
 
-            modelBuilder.Entity("JobAggregator.DataAccess.Entities.JobLocation", b =>
-                {
-                    b.HasOne("JobAggregator.DataAccess.Entities.JobPost", "JobPost")
-                        .WithMany("Locations")
-                        .HasForeignKey("JobPostId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("JobPost");
-                });
-
             modelBuilder.Entity("JobAggregator.DataAccess.Entities.JobPost", b =>
                 {
                     b.HasOne("JobAggregator.DataAccess.Entities.SearchKeyword", "SearchKeyword")
@@ -230,11 +165,6 @@ namespace JobAggregator.DataAccess.Migrations
                         .IsRequired();
 
                     b.Navigation("SearchKeyword");
-                });
-
-            modelBuilder.Entity("JobAggregator.DataAccess.Entities.JobPost", b =>
-                {
-                    b.Navigation("Locations");
                 });
 
             modelBuilder.Entity("JobAggregator.DataAccess.Entities.SearchKeyword", b =>

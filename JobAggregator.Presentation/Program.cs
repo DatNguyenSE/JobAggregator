@@ -48,7 +48,7 @@ app.MapPost("/api/jobs/init-db", async (JobAggregator.DataAccess.Data.AppDbConte
     }
 });
 
-// MINIMAL API ROUTE 2: Nhận HTTP POST từ Frontend Angular với bộ lọc đa tiêu chí
+// LUỒNG 1: Angular POST tiêu chí; JobSearchService tra DB trước và chỉ xếp lịch cào khi thiếu.
 app.MapPost("/api/jobs/search", async (JobAggregator.BusinessLogic.DTOs.SearchCriteriaDto criteria, IJobSearchService searchService) =>
 {
     if (criteria == null || string.IsNullOrWhiteSpace(criteria.Keyword))
@@ -59,19 +59,14 @@ app.MapPost("/api/jobs/search", async (JobAggregator.BusinessLogic.DTOs.SearchCr
     // Gọi tầng Business Logic để xử lý
     var result = await searchService.SearchJobsAsync(criteria);
 
-    if (result.IsFound)
-    {
-        // Có dữ liệu -> Trả về HTTP 200 (OK) và danh sách DTO Json ngay lập tức
-        return Results.Ok(result.Jobs);
-    }
-    else
-    {
-        // Không có dữ liệu -> Trả về HTTP 202 (Accepted) để Frontend hiển thị màn hình chờ (Polling)
-        return Results.Accepted(value: new 
-        { 
-            Message = "Hệ thống đang thu thập dữ liệu mới từ mạng xã hội. Vui lòng làm mới trang sau ít phút." 
-        });
-    }
+    return Results.Ok(result);
+});
+
+// Frontend polling endpoint này để đọc dữ liệu mới trong DB; GET không gửi thêm yêu cầu cào.
+app.MapGet("/api/jobs/search/{requestId:guid}", async (Guid requestId, IJobSearchService searchService) =>
+{
+    var result = await searchService.GetStatusAsync(requestId);
+    return result == null ? Results.NotFound() : Results.Ok(result);
 });
 
 app.Run();

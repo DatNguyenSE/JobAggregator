@@ -36,7 +36,7 @@ namespace JobAggregator.Presentation
         }
 
         /// <summary>
-        /// Handler 1: Bắt tin nhắn từ ScrapingQueue để cào dữ liệu thô
+        /// LUỒNG 2: ScrapingQueue kích hoạt DataFetcherFunction để cào số job còn thiếu.
         /// </summary>
         public async Task DataFetcherHandler(SQSEvent sqsEvent, ILambdaContext context)
         {
@@ -56,15 +56,16 @@ namespace JobAggregator.Presentation
                 }
                 catch (Exception ex)
                 {
-                    context.Logger.LogLine($"Lỗi cào dữ liệu: {ex.Message}");
+                    context.Logger.LogLine($"Lỗi cào dữ liệu: {ex}");
                     throw; // Quăng lỗi để SQS tự động đẩy vào Dead Letter Queue (nếu có cấu hình)
                 }
             }
         }
 
         /// <summary>
-        /// Handler 2: Bắt tin nhắn từ AIProcessingQueue để nhờ Claude 3 đọc HTML
+        /// LUỒNG 3: AIProcessingQueue kích hoạt AIProcessorFunction để chuẩn hóa và lưu dữ liệu.
         /// </summary>
+        // BƯỚC 4: Lambda nhận kết quả SQS rồi gọi ProcessJobDataAsync; không phải lúc nào cũng dùng AI.
         public async Task AIProcessorHandler(SQSEvent sqsEvent, ILambdaContext context)
         {
             using var scope = _serviceProvider.CreateScope();
@@ -77,15 +78,39 @@ namespace JobAggregator.Presentation
                     context.Logger.LogLine($"[Luồng 3 - Bắt đầu lưu Database]: {record.Body}");
 
                     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                    var payload = JsonSerializer.Deserialize<TinyFishPayload>(record.Body, options);
-                    if (payload != null && !string.IsNullOrEmpty(payload.RawJsonData) && payload.Criteria != null)
+                    var payload = JsonSerializer.Deserialize<ScrapingResultPayload>(record.Body, options);
+                    if (payload?.Criteria != null)
                     {
-                        await aiProcessorService.ProcessTinyFishDataAsync(payload.RawJsonData, payload.Criteria);
+                        var searchService = scope.ServiceProvider.GetRequiredService<IJobSearchService>();
+                        try
+                        {
+                            var results = payload.SourceResults ?? new System.Collections.Generic.List<string>();
+                            if (!string.IsNullOrWhiteSpace(payload.RawJsonData)) results.Add(payload.RawJsonData);
+                            var scrapedAt = payload.ScrapedAt;
+                            if (!scrapedAt.HasValue && record.Attributes != null &&
+                                record.Attributes.TryGetValue("SentTimestamp", out var sent) && long.TryParse(sent, out var milliseconds))
+                                scrapedAt = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
+                            // List<JobPostDto> chuẩn đi thẳng; dữ liệu thô mới cần nhánh Bedrock.
+                            foreach (var raw in results)
+                                await aiProcessorService.ProcessJobDataAsync(raw, payload.Criteria, scrapedAt);
+                            // Đánh dấu request kết thúc để lần polling tiếp theo dừng trạng thái đang cào.
+                            await searchService.FinishAsync(payload.Criteria.RequestId,
+                                payload.Errors?.Count > 0 ? string.Join(" ", payload.Errors) : null);
+                        }
+                        catch (Exception ex)
+                        {
+                            context.Logger.LogLine($"[Processing Error] Request={payload.Criteria.RequestId}: {ex}");
+                            // Use a fresh scope because the failed DbContext may still contain pending entities.
+                            using var errorScope = _serviceProvider.CreateScope();
+                            await errorScope.ServiceProvider.GetRequiredService<IJobSearchService>().FinishAsync(
+                                payload.Criteria.RequestId, "Không thể lưu kết quả cào. Vui lòng thử lại sau.");
+                            throw;
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    context.Logger.LogLine($"Lỗi xử lý Data: {ex.Message}");
+                    context.Logger.LogLine($"Lỗi xử lý Data: {ex}");
                     throw;
                 }
             }
@@ -98,9 +123,12 @@ namespace JobAggregator.Presentation
         public string Keyword { get; set; } = string.Empty;
     }
 
-    public class TinyFishPayload
+    public class ScrapingResultPayload
     {
+        public JobAggregator.BusinessLogic.DTOs.SearchCriteriaDto Criteria { get; set; } = new();
+        public System.Collections.Generic.List<string>? SourceResults { get; set; }
+        public System.Collections.Generic.List<string>? Errors { get; set; }
+        public DateTime? ScrapedAt { get; set; }
         public string RawJsonData { get; set; } = string.Empty;
-        public JobAggregator.BusinessLogic.DTOs.SearchCriteriaDto Criteria { get; set; } = new JobAggregator.BusinessLogic.DTOs.SearchCriteriaDto();
     }
 }

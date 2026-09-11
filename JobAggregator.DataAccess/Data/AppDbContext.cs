@@ -10,7 +10,9 @@ namespace JobAggregator.DataAccess.Data
         }
 
         public DbSet<SearchKeyword> SearchKeywords { get; set; }
+        public DbSet<JobSearchRequest> JobSearchRequests { get; set; }
         public DbSet<JobPost> JobPosts { get; set; }
+        public DbSet<JobLocation> JobLocations { get; set; }
         public DbSet<WebSocketConnection> WebSocketConnections { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -26,6 +28,15 @@ namespace JobAggregator.DataAccess.Data
                 .WithMany(k => k.JobPosts)
                 .HasForeignKey(j => j.SearchKeywordId)
                 .OnDelete(DeleteBehavior.Cascade);
+                
+            modelBuilder.Entity<JobLocation>()
+                .HasOne(l => l.JobPost)
+                .WithMany(j => j.Locations)
+                .HasForeignKey(l => l.JobPostId)
+                .OnDelete(DeleteBehavior.Cascade);
+                
+            modelBuilder.Entity<JobLocation>()
+                .HasIndex(l => new { l.Province, l.District });
 
             // Cấu hình Unique Constraint để chống trùng lặp dựa vào Platform và ExternalId
             modelBuilder.Entity<JobPost>()
