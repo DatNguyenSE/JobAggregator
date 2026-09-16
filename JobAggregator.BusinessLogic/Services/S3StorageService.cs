@@ -18,6 +18,24 @@ namespace JobAggregator.BusinessLogic.Services
             _bucketName = Environment.GetEnvironmentVariable("RAW_DATA_BUCKET") ?? "local-mock-bucket";
         }
 
+        public async Task<string> UploadJsonAsync(string json)
+        {
+            var key = $"raw-jobs/facebook/{Guid.NewGuid():N}.json";
+            await _s3Client.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = _bucketName, Key = key, ContentBody = json, ContentType = "application/json"
+            });
+            return key;
+        }
+
+        public async Task<string> DownloadJsonAsync(string key)
+        {
+            if (!key.StartsWith("raw-jobs/facebook/", StringComparison.Ordinal))
+                throw new ArgumentException("Invalid Facebook payload key.", nameof(key));
+            using var response = await _s3Client.GetObjectAsync(_bucketName, key);
+            using var reader = new System.IO.StreamReader(response.ResponseStream);
+            return await reader.ReadToEndAsync();
+        }
         public async Task<string> UploadRawDataAsync(string keyword, string rawText, string? imageUrl)
         {
             // Đóng gói dữ liệu thành JSON

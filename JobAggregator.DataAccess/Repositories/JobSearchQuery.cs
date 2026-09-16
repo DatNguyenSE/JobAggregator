@@ -20,7 +20,7 @@ public static class JobSearchQuery
         // Dùng chung cho truy vấn DB và kiểm tra candidate vừa được scraper tạo.
         var key = keyword.Trim().ToLowerInvariant();
         // Search terms stored with a job preserve source search semantics (e.g. sale / kinh doanh).
-        jobs = jobs.Where(j => j.Title.ToLower().Contains(key) || j.SearchKeyword.Keyword.ToLower() == key);
+        jobs = jobs.Where(j => j.Title.ToLower().Contains(key) || j.Roles.Any(role => role.ToLower().Contains(key)) || j.SearchKeyword.Keyword.ToLower() == key);
         // LastScrapedAt xác định độ mới; CreatedAt hỗ trợ record cũ chưa có LastScrapedAt.
         if (freshSince.HasValue) jobs = jobs.Where(j => (j.LastScrapedAt ?? j.CreatedAt) >= freshSince.Value);
         if (sources?.Length > 0)

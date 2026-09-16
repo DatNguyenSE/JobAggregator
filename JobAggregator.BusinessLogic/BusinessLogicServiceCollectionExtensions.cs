@@ -11,6 +11,7 @@ namespace JobAggregator.BusinessLogic
         {
             // Đăng ký các Interface - Service nội bộ
             services.AddScoped<IJobSearchService, JobSearchService>();
+            services.AddScoped<JobCatalogService>();
             services.AddScoped<IAiJobProcessorService, AiJobProcessorService>();
             services.AddScoped<IDataFetcherService, DataFetcherService>();
             services.AddScoped<IS3StorageService, S3StorageService>();

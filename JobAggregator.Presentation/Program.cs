@@ -1,72 +1,48 @@
 using JobAggregator.BusinessLogic;
-using JobAggregator.BusinessLogic.Services.Interfaces;
+using JobAggregator.BusinessLogic.DTOs;
+using JobAggregator.BusinessLogic.Services;
 using JobAggregator.DataAccess;
 using JobAggregator.DataAccess.Data;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
-
-
-        
-// Tích hợp hosting cho AWS Lambda API Gateway
 builder.Services.AddAWSLambdaHosting(LambdaEventSource.RestApi);
-
-
-// Cấu hình CORS cho Angular
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowAll", policy =>
-    {
-        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
-    });
-});
-
-// ĐĂNG KÝ DEPENDENCY INJECTION CHO TỪNG LAYER (Cấu trúc N-Tier)
+builder.Services.AddCors(options => options.AddPolicy("AllowAll", policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddDataAccess(builder.Configuration);
 builder.Services.AddBusinessLogic();
-
 var app = builder.Build();
-
 app.UseCors("AllowAll");
 
-// MINIMAL API ROUTE 1: Khởi tạo/Cập nhật Database (Dùng cho môi trường Dev hoặc khởi tạo nhanh)
-app.MapPost("/api/jobs/init-db", async (JobAggregator.DataAccess.Data.AppDbContext dbContext) =>
+// Functional test build: authentication will be added with Cognito.
+app.MapPost("/api/jobs/init-db", async (HttpContext context, AppDbContext db) =>
 {
-    try
-    {
-        // Tự động áp dụng các bản Migration để tạo bảng trong PostgreSQL
-        await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.MigrateAsync(dbContext.Database);
-        return Results.Ok(new { Message = "Cấu trúc Database đã được khởi tạo/cập nhật thành công!" });
-    }
-    catch (System.Exception ex)
-    {
-        return Results.Problem(detail: ex.Message, title: "Lỗi khởi tạo DB");
-    }
+    if (!app.Environment.IsDevelopment()) return Results.NotFound();
+    await db.Database.MigrateAsync();
+    return Results.Ok(new { Message = "Migration complete" });
 });
-
-// LUỒNG 1: Angular POST tiêu chí; JobSearchService tra DB trước và chỉ xếp lịch cào khi thiếu.
-app.MapPost("/api/jobs/search", async (JobAggregator.BusinessLogic.DTOs.SearchCriteriaDto criteria, IJobSearchService searchService) =>
+app.MapGet("/api/jobs/facebook-groups", async (int? page, JobCatalogService catalog) => Results.Ok(await catalog.GroupsAsync(page ?? 1)));
+app.MapPost("/api/jobs/search", async (SearchCriteriaDto criteria, JobCatalogService catalog) =>
 {
-    if (criteria == null || string.IsNullOrWhiteSpace(criteria.Keyword))
-    {
-        return Results.BadRequest("Keyword không được bỏ trống.");
-    }
-
-    // Gọi tầng Business Logic để xử lý
-    var result = await searchService.SearchJobsAsync(criteria);
-
-    return Results.Ok(result);
+    try { return Results.Ok(await catalog.ReadAsync(criteria)); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { message = ex.Message }); }
 });
-
-// Frontend polling endpoint này để đọc dữ liệu mới trong DB; GET không gửi thêm yêu cầu cào.
-app.MapGet("/api/jobs/search/{requestId:guid}", async (Guid requestId, IJobSearchService searchService) =>
+app.MapPost("/api/jobs/scrape", async (SearchCriteriaDto criteria, HttpContext context, JobCatalogService catalog) =>
 {
-    var result = await searchService.GetStatusAsync(requestId);
+    try { return Results.Ok(await catalog.StartAsync(criteria, context.Request.Headers["Idempotency-Key"].ToString())); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { message = ex.Message }); }
+    catch (InvalidOperationException ex) { return Results.Conflict(new { message = ex.Message }); }
+});
+app.MapGet("/api/jobs/search/{requestId:guid}", async (Guid requestId, JobCatalogService catalog) =>
+{
+    var result = await catalog.StatusAsync(requestId);
     return result == null ? Results.NotFound() : Results.Ok(result);
 });
-
+app.MapPost("/api/jobs/scrape/{id:guid}/retry", async (Guid id, JobCatalogService catalog) =>
+{
+    try { return Results.Ok(await catalog.RetryAsync(id)); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { message = ex.Message }); }
+    catch (InvalidOperationException ex) { return Results.Conflict(new { message = ex.Message }); }
+});
 app.Run();

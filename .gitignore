@@ -119,3 +119,6 @@ Temporary Items
 template.yaml
 JobAggregator.Presentation/appsettings.json
 JobAggregator.Presentation/Properties/launchSettings.json
+
+# Local Lambda deployment artifacts
+.artifacts/

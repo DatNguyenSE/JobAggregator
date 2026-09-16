@@ -7,6 +7,10 @@ namespace JobAggregator.DataAccess.Entities
     public class JobPost
     {
         public Guid Id { get; set; }
+        public Guid? FacebookGroupId { get; set; }
+        public FacebookGroup? FacebookGroup { get; set; }
+        public string? ContentHash { get; set; }
+        public string[] Roles { get; set; } = Array.Empty<string>();
         public Guid SearchKeywordId { get; set; }
         public SearchKeyword SearchKeyword { get; set; } = null!;
 

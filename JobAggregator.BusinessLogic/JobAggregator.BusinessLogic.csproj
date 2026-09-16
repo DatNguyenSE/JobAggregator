@@ -10,7 +10,7 @@
     <PackageReference Include="AWSSDK.SQS" Version="3.7.300" />
     <PackageReference Include="AWSSDK.ApiGatewayManagementApi" Version="3.7.300" />
     <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="2.1.9" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="2.1.11" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -14,6 +14,8 @@ namespace JobAggregator.BusinessLogic.Mappings
             return new JobPostDto
             {
                 Id = entity.Id,
+                FacebookGroupId = entity.FacebookGroupId,
+                Roles = entity.Roles,
                 Title = entity.Title,
                 SalaryInfo = entity.SalaryInfo,
                 Requirements = entity.Requirements,
@@ -58,6 +60,8 @@ namespace JobAggregator.BusinessLogic.Mappings
             {
                 Id = dto.Id != Guid.Empty ? dto.Id : Guid.NewGuid(),
                 SearchKeywordId = searchKeywordId,
+                FacebookGroupId = dto.FacebookGroupId,
+                Roles = dto.Roles ?? Array.Empty<string>(),
                 Title = string.IsNullOrWhiteSpace(dto.Title) ? "Không có tiêu đề" : dto.Title,
                 SalaryInfo = dto.SalaryInfo,
                 Requirements = dto.Requirements,

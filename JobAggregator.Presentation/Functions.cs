@@ -81,6 +81,12 @@ namespace JobAggregator.Presentation
                     var payload = JsonSerializer.Deserialize<ScrapingResultPayload>(record.Body, options);
                     if (payload?.Criteria != null)
                     {
+                        var db = scope.ServiceProvider.GetRequiredService<JobAggregator.DataAccess.Data.AppDbContext>();
+                        if (!payload.Criteria.RequestId.HasValue) throw new InvalidOperationException("Missing run ID");
+                        await using var processingLock = await RunProcessingLock.AcquireAsync(db, payload.Criteria.RequestId.Value);
+                        db.ChangeTracker.Clear();
+                        var savedRun = await db.JobSearchRequests.FindAsync(payload.Criteria.RequestId.Value);
+                        if (savedRun == null || savedRun.Status is "complete" or "partial") continue;
                         var searchService = scope.ServiceProvider.GetRequiredService<IJobSearchService>();
                         try
                         {
@@ -92,7 +98,15 @@ namespace JobAggregator.Presentation
                                 scrapedAt = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
                             // List<JobPostDto> chuẩn đi thẳng; dữ liệu thô mới cần nhánh Bedrock.
                             foreach (var raw in results)
-                                await aiProcessorService.ProcessJobDataAsync(raw, payload.Criteria, scrapedAt);
+                                {
+                                    var sourceJson = raw;
+                                    using var source = JsonDocument.Parse(raw);
+                                    if (source.RootElement.ValueKind == JsonValueKind.Object &&
+                                        source.RootElement.TryGetProperty("Kind", out var kind) && kind.GetString() == "s3-source")
+                                        sourceJson = await scope.ServiceProvider.GetRequiredService<IS3StorageService>()
+                                            .DownloadJsonAsync(source.RootElement.GetProperty("Key").GetString()!);
+                                    await aiProcessorService.ProcessJobDataAsync(sourceJson, payload.Criteria, scrapedAt);
+                                }
                             // Đánh dấu request kết thúc để lần polling tiếp theo dừng trạng thái đang cào.
                             await searchService.FinishAsync(payload.Criteria.RequestId,
                                 payload.Errors?.Count > 0 ? string.Join(" ", payload.Errors) : null);

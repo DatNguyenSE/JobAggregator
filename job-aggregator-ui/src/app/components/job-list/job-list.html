@@ -1,91 +1,214 @@
 <div class="job-container">
-  <div class="header-section">
-   
-  </div>
-  
+
+  <!-- ══ SEARCH PANEL ══════════════════════════════════════════════════ -->
   <div class="search-panel">
-    <div class="search-row">
-      <div class="input-wrapper">
-        <span class="search-icon">🔍</span>
-        <input type="text" [(ngModel)]="criteria.Keyword" placeholder="Nhập từ khóa (vd: Phục vụ, Pha chế)..." (keyup.enter)="searchJobs()">
-      </div>
-      <div class="input-wrapper">
-        <span class="search-icon">📍</span>
-        <select [(ngModel)]="selectedProvince" (change)="onProvinceChange()">
-          <option value="">-- Chọn Tỉnh / Thành phố (Không bắt buộc) --</option>
-          <option *ngFor="let p of provinces" [value]="p.province">{{ p.province }}</option>
-        </select>
-      </div>
-      <div class="input-wrapper" *ngIf="selectedProvince">
-        <span class="search-icon">🏢</span>
-        <select [(ngModel)]="selectedDistrict">
-          <option value="">-- Chọn Quận / Huyện (Không bắt buộc) --</option>
-          <option *ngFor="let d of districts" [value]="d">{{ d }}</option>
-        </select>
-      </div>
-      <div class="input-wrapper select-wrapper">
-        <span class="search-icon">💼</span>
-        <select [(ngModel)]="criteria.JobType">
-          <option value="">Tất cả hình thức</option>
-          <option value="Part-time">Part-time (Bán thời gian)</option>
-          <option value="Full-time">Full-time (Toàn thời gian)</option>
-          <option value="Sinh viên">Việc làm sinh viên</option>
-        </select>
-      </div>
-    </div>
-    
-    <div class="sources-row">
-      <span class="sources-label">Cào dữ liệu từ:</span>
-      <label class="source-checkbox"><input type="checkbox" [(ngModel)]="sources.chotot"> Chợ Tốt</label>
-      <label class="source-checkbox"><input type="checkbox" [(ngModel)]="sources.facebook"> Facebook Groups</label>
-      <label class="source-checkbox"><input type="checkbox" [(ngModel)]="sources.vieclam24h"> Việc Làm 24h</label>
-      <label class="source-checkbox"><input type="checkbox" [(ngModel)]="sources.topcv"> TopCV</label>
+
+    <!-- Tab switcher -->
+    <div class="tab-bar">
+      <button class="tab-btn" [class.active]="activeTab === 'vieclam24h'" (click)="setTab('vieclam24h')">
+        <span class="tab-icon">💼</span>
+        <span class="tab-label">Việc Làm 24h</span>
+      </button>
+      <button class="tab-btn" [class.active]="activeTab === 'facebook'" (click)="setTab('facebook')">
+        <span class="tab-icon">📘</span>
+        <span class="tab-label">Facebook Groups</span>
+      </button>
     </div>
 
-    <div class="limit-selector-row" style="margin-top: 15px; display: flex; align-items: center; gap: 15px;">
-      <span class="sources-label" style="font-weight: 600; color: #1e293b;">Số lượng Job tối đa: </span>
-      <span style="font-weight: bold; color: #ef4444; width: 30px;">{{ criteria.MaxJobs }}</span>
-      <input type="range" min="1" max="20" step="1" [(ngModel)]="criteria.MaxJobs" style="flex: 1; max-width: 200px; cursor: pointer;">
+    <section *ngIf="activeTab === 'facebook'" class="group-catalog">
+      <div class="catalog-heading"><h2>Nhóm đã lưu</h2><button *ngIf="isAdmin" type="button" (click)="newGroup()">+ Cào nhóm mới</button></div>
+      <p>Xem tin từ database. Bấm Cào thêm khi cần cập nhật từ nguồn.</p>
+      <p *ngIf="groupsLoading">Đang tải danh sách nhóm...</p>
+      <p *ngIf="groupMessage">{{ groupMessage }} <button (click)="loadGroups()">Thử lại</button></p>
+      <p *ngIf="!groupsLoading && !groupMessage && !groups.length">Chưa có nhóm đã lưu.</p>
+      <button type="button" class="group-card" *ngFor="let group of groups" (click)="selectGroup(group)" [class.selected]="selectedGroup?.id === group.id">
+        <strong>{{ group.name }}</strong><span>{{ group.jobCount }} tin tuyển dụng đã lưu</span>
+        <small *ngIf="group.lastSuccessfulScrapedAt">Cào thành công: {{ group.lastSuccessfulScrapedAt | date:'dd/MM/yyyy HH:mm' }}</small>
+        <small *ngIf="!group.lastSuccessfulScrapedAt">Chưa có lượt cào thành công được ghi nhận</small>
+        <small *ngIf="group.lastFetchedCount !== null && group.lastFetchedCount !== undefined">Lượt đó lấy {{ group.lastFetchedCount }} bài</small>
+      </button>
+      <div class="pagination" *ngIf="groupPage > 1 || groupsHaveMore">
+        <button [disabled]="groupPage === 1 || groupsLoading" (click)="loadGroups(groupPage - 1)">Trước</button>
+        <span>Trang nhóm {{ groupPage }}</span>
+        <button [disabled]="!groupsHaveMore || groupsLoading" (click)="loadGroups(groupPage + 1)">Sau</button>
+      </div>
+      <div *ngIf="selectedGroup" class="saved-search">
+        <h3>{{ selectedGroup.name }}</h3>
+        <label for="saved-keyword">Tìm nghề trong tin đã lưu</label>
+        <input id="saved-keyword" [(ngModel)]="fbSearchText" (keyup.enter)="searchJobs()" placeholder="Ví dụ: phụ bếp">
+        <button (click)="searchJobs()" [disabled]="isLoading">Tìm trong nhóm đã lưu</button>
+        <button *ngIf="isAdmin" (click)="showScrapeForm = !showScrapeForm">Cào thêm từ nhóm này</button>
+      </div>
+    </section>
+
+    <!-- ── TAB: Vieclam24h ─────────────────────────────────────────── -->
+    <div class="tab-content" *ngIf="activeTab === 'vieclam24h'">
+      <div class="source-badge vl24">
+        <img src="https://vieclam24h.vn/favicon.ico" alt="" class="source-favicon" onerror="this.style.display='none'">
+        Tìm tin đã lưu từ <strong>vieclam24h.vn</strong>
+      </div>
+
+      <!-- Keyword -->
+      <div class="field-group">
+        <label class="field-label">🔍 Từ khóa tìm kiếm <span class="required">*</span></label>
+        <div class="input-wrapper">
+          <input type="text" [(ngModel)]="vl24Keyword"
+                 placeholder="Pha chế, Phục vụ, Lập trình viên..."
+                 (keyup.enter)="searchJobs()">
+        </div>
+      </div>
+
+      <!-- Job type -->
+      <div class="field-group">
+        <label class="field-label">💼 Hình thức làm việc</label>
+        <div class="input-wrapper">
+          <select [(ngModel)]="vl24JobType">
+            <option value="">Tất cả hình thức</option>
+            <option value="Part-time">Part-time (Bán thời gian)</option>
+            <option value="Full-time">Full-time (Toàn thời gian)</option>
+            <option value="Sinh viên">Việc làm sinh viên</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Location row -->
+      <div class="field-row">
+        <div class="field-group flex-1">
+          <label class="field-label">📍 Tỉnh / Thành phố</label>
+          <div class="input-wrapper">
+            <select [(ngModel)]="selectedProvince" (change)="onProvinceChange()">
+              <option value="">-- Không bắt buộc --</option>
+              <option *ngFor="let p of provinces" [value]="p.province">{{ p.province }}</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-group flex-1" *ngIf="selectedProvince">
+          <label class="field-label">🏢 Quận / Huyện</label>
+          <div class="input-wrapper">
+            <select [(ngModel)]="selectedDistrict">
+              <option value="">-- Không bắt buộc --</option>
+              <option *ngFor="let d of districts" [value]="d">{{ d }}</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <button class="search-btn" (click)="searchJobs()" [disabled]="isLoading" [class.loading-btn]="isLoading" style="margin-top: 20px;">
-      <span *ngIf="!isLoading">Tìm việc ngay</span>
-      <span *ngIf="isLoading" class="spinner"></span>
-    </button>
+    <!-- ── TAB: Facebook ───────────────────────────────────────────── -->
+    <div class="tab-content" *ngIf="activeTab === 'facebook' && isAdmin && showScrapeForm">
+      <div class="source-badge fb">
+        <span class="fb-dot">f</span>
+        Cào từ <strong>Facebook Groups</strong> qua Apify
+      </div>
+
+      <!-- Group URL -->
+      <div class="field-group">
+        <label class="field-label">🔗 URL Nhóm Facebook công khai <span class="required">*</span></label>
+        <div class="facebook-url-control"
+             (mouseenter)="showFacebookHistory = true"
+             (mouseleave)="showFacebookHistory = false"
+             (focusout)="closeFacebookHistory($event)"
+             (keydown.escape)="showFacebookHistory = false">
+          <div class="input-wrapper" [class.input-error]="facebookUrlError">
+            <input type="url" [(ngModel)]="facebookGroupUrl" [readOnly]="!!selectedGroup"
+                   (ngModelChange)="facebookUrlError = ''; showFacebookHistory = true"
+                   (focus)="showFacebookHistory = true"
+                   (click)="showFacebookHistory = true"
+                   (keyup.enter)="searchJobs()"
+                   autocomplete="off"
+                   [attr.aria-invalid]="facebookUrlError ? 'true' : null"
+                   placeholder="https://www.facebook.com/groups/ten-nhom/">
+          </div>
+          <div *ngIf="showFacebookHistory && facebookUrlHistory.length" class="facebook-url-history">
+            <span class="history-label">📌 Nhóm đã dùng gần đây</span>
+            <button type="button" *ngFor="let url of facebookUrlHistory" (click)="selectFacebookUrl(url)">
+              {{ url }}
+            </button>
+          </div>
+        </div>
+        <p class="field-error" *ngIf="facebookUrlError">⚠️ {{ facebookUrlError }}</p>
+        <small class="field-hint">URL được lưu trên trình duyệt sau khi bấm tìm việc.</small>
+      </div>
+
+      <!-- View option -->
+      <div class="field-row">
+        <div class="field-group flex-1">
+          <label class="field-label">📊 Sắp xếp bài viết</label>
+          <div class="input-wrapper">
+            <select [(ngModel)]="fbViewOption">
+              <option value="CHRONOLOGICAL">🕐 Mới nhất (Chronological)</option>
+              <option value="RECENT_ACTIVITY">🔥 Hoạt động gần đây</option>
+              <option value="TOP_POSTS">⭐ Bài nổi bật</option>
+              <option value="CHRONOLOGICAL_LISTINGS">🛒 Bài mua bán</option>
+            </select>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Only newer than -->
+      <div class="field-group">
+        <label class="field-label">📆 Chỉ lấy bài mới hơn ngày</label>
+        <div class="input-wrapper">
+          <input type="date" [(ngModel)]="fbOnlyPostsNewerThan">
+        </div>
+        <small class="field-hint">Để trống nếu không cần lọc theo ngày.</small>
+      </div>
+    </div>
+
+    <!-- ── SHARED: Result limit slider ────────────────────────────────── -->
+    <div class="field-group slider-group" *ngIf="isAdmin && (activeTab === 'vieclam24h' || showScrapeForm)">
+      <div class="slider-header">
+        <label class="field-label">📦 Số bài yêu cầu cào tối đa</label>
+        <span class="slider-value">{{ maxJobs }}</span>
+      </div>
+      <input type="range" min="1" max="20" step="1" [(ngModel)]="maxJobs" class="range-slider">
+      <div class="slider-labels"><span>1</span><span>20</span></div>
+    </div>
+
+    <button *ngIf="activeTab === 'vieclam24h'" class="search-btn" (click)="searchJobs()" [disabled]="isLoading">Tìm trong dữ liệu đã lưu</button>
+    <button *ngIf="isAdmin && (activeTab === 'vieclam24h' || showScrapeForm)" class="search-btn scrape-action" (click)="startScrape()" [disabled]="isLoading">Cào thêm {{ activeTab === 'facebook' ? 'từ nhóm Facebook' : 'theo tiêu chí này' }}</button>
+    <p class="field-hint" *ngIf="isAdmin && (activeTab === 'vieclam24h' || showScrapeForm)">Lượt cào có thể phát sinh chi phí. Số bài lấy được có thể ít hơn giới hạn yêu cầu.</p>
   </div>
 
-  <!-- Loading State & AI Status -->
+  <!-- ══ LOADING STATE ═════════════════════════════════════════════════ -->
   <div *ngIf="isLoading" class="ai-status-card">
     <div class="radar-spinner"></div>
     <div class="status-text">
-      <h4>Đang quét mạng lưới</h4>
+      <h4>Đang xử lý yêu cầu</h4>
       <p class="animated-dots">{{ message }}</p>
     </div>
   </div>
 
-  <!-- Error State -->
+  <!-- ══ MESSAGE / ERROR ═══════════════════════════════════════════════ -->
   <div *ngIf="message && !isLoading" class="error-alert">
     {{ message }}
   </div>
 
-  <!-- Job List -->
+  <button *ngIf="isAdmin && (runStatus === 'partial' || runStatus === 'failed')" (click)="retryProcessing()">Thử xử lý lại dữ liệu đã lấy</button>
+  <div class="pagination" *ngIf="hasSearched && (page > 1 || hasMore)">
+    <button [disabled]="page === 1 || isLoading" (click)="changePage(-1)">Trang trước</button>
+    <span>Trang {{ page }} · {{ jobs.length }} tin tuyển dụng</span>
+    <button [disabled]="!hasMore || isLoading" (click)="changePage(1)">Trang sau</button>
+  </div>
+  <!-- ══ JOB LIST ══════════════════════════════════════════════════════ -->
   <div class="job-list" *ngIf="jobs.length > 0">
     <div class="job-card" *ngFor="let job of jobs" [class.expanded]="expandedJobIds.has(job.id)">
       <div class="card-header" style="cursor: pointer;" (click)="toggleJob(job.id)">
         <h3>{{ job.title }}</h3>
         <span class="platform-badge">{{ job.platform || 'Unknown' }}</span>
-        <span class="expand-icon" style="margin-left: auto; font-size: 1.2rem;">{{ expandedJobIds.has(job.id) ? '▲' : '▼' }}</span>
+        <span class="expand-icon">{{ expandedJobIds.has(job.id) ? '▲' : '▼' }}</span>
       </div>
-      
-      <div class="job-meta" style="cursor: pointer;" (click)="toggleJob(job.id)">
-        <span class="meta-item location"><i class="icon">📍</i> {{ job.location || 'Bất kỳ đâu' }}</span>
-        <span class="meta-item salary"><i class="icon">💰</i> {{ job.salaryInfo || 'Lương thỏa thuận' }}</span>
+
+      <div *ngIf="job.location || job.salaryInfo" class="job-meta" style="cursor: pointer;" (click)="toggleJob(job.id)">
+        <span *ngIf="job.location" class="meta-item location"><i class="icon">📍</i> {{ job.location }}</span>
+        <span *ngIf="job.salaryInfo" class="meta-item salary"><i class="icon">💰</i> {{ job.salaryInfo }}</span>
       </div>
-      
+
+      <p *ngIf="job.roles?.length" class="role-list">Vị trí: {{ job.roles?.join(' · ') }}</p>
       <div class="card-body" *ngIf="expandedJobIds.has(job.id)">
-        <div class="employer-info" *ngIf="job.employerName || job.contactPhone || job.locations">
+        <div class="employer-info" *ngIf="job.employerName || job.contactPhone || job.locations?.length">
           <p *ngIf="job.employerName"><strong>🏢 Nơi làm:</strong> {{ job.employerName }}</p>
-          
           <div *ngIf="job.locations && job.locations.length > 0" style="margin: 8px 0;">
             <div class="info-row">
               <strong>📍 Địa chỉ:</strong>
@@ -99,21 +222,27 @@
           <p *ngIf="job.contactPhone"><strong>📞 Liên hệ:</strong> <a [href]="'tel:' + job.contactPhone" style="color: #4b6bfb; font-weight: bold;">{{ job.contactPhone }}</a></p>
           <hr style="border: 0; border-top: 1px dashed #e2e8f0; margin: 10px 0;">
         </div>
-        
-        <div class="general-info-container" style="background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-          <h4 style="margin: 0 0 10px 0; color: #334155; font-size: 1rem;">📋 Thông tin chung</h4>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9rem;">
-            <div *ngIf="job.gender"><span style="color: #64748b;">Giới tính:</span> <strong>{{ job.gender }}</strong></div>
-            <div *ngIf="job.vacancies"><span style="color: #64748b;">Số lượng tuyển:</span> <strong>{{ job.vacancies }}</strong></div>
-            <div *ngIf="job.workingFormat"><span style="color: #64748b;">Hình thức:</span> <strong>{{ job.workingFormat }}</strong></div>
-            <div *ngIf="job.ageRequirement"><span style="color: #64748b;">Độ tuổi:</span> <strong>{{ job.ageRequirement }}</strong></div>
-            <div *ngIf="job.experience"><span style="color: #64748b;">Kinh nghiệm:</span> <strong>{{ job.experience }}</strong></div>
+
+        <div class="general-info-container" *ngIf="job.gender || job.vacancies || job.workingFormat || job.ageRequirement || job.experience">
+          <h4>📋 Thông tin chung</h4>
+          <div class="info-grid">
+            <div *ngIf="job.gender"><span class="info-key">Giới tính:</span> <strong>{{ job.gender }}</strong></div>
+            <div *ngIf="job.vacancies"><span class="info-key">Số lượng tuyển:</span> <strong>{{ job.vacancies }}</strong></div>
+            <div *ngIf="job.workingFormat"><span class="info-key">Hình thức:</span> <strong>{{ job.workingFormat }}</strong></div>
+            <div *ngIf="job.ageRequirement"><span class="info-key">Độ tuổi:</span> <strong>{{ job.ageRequirement }}</strong></div>
+            <div *ngIf="job.experience"><span class="info-key">Kinh nghiệm:</span> <strong>{{ job.experience }}</strong></div>
           </div>
         </div>
 
+        <section class="general-info-container" *ngIf="job.workingHours || job.workingDays">
+          <h4>🕐 Thời gian làm việc</h4>
+          <p *ngIf="job.workingHours" style="white-space: pre-wrap;"><strong>Giờ làm:</strong> {{ job.workingHours }}</p>
+          <p *ngIf="job.workingDays" style="white-space: pre-wrap;"><strong>Ngày làm:</strong> {{ job.workingDays }}</p>
+        </section>
+
         <p class="requirements" *ngIf="job.jobInfo" style="white-space: pre-wrap;"><strong>📜 Mô tả công việc:</strong><br>{{ job.jobInfo }}</p>
         <p class="requirements" *ngIf="job.requirements" style="white-space: pre-wrap;"><strong>🎯 Yêu cầu ứng viên:</strong><br>{{ job.requirements }}</p>
-        
+
         <div class="benefits-container" *ngIf="job.otherBenefits || job.holidayBonuses">
           <strong>💎 Phúc lợi:</strong>
           <ul class="benefits-list">
@@ -121,14 +250,14 @@
             <li *ngIf="job.otherBenefits" style="white-space: pre-wrap;">{{ job.otherBenefits }}</li>
           </ul>
         </div>
-        
+
         <div class="card-footer" style="margin-top: 15px; text-align: right; border-top: 1px solid #f1f5f9; padding-top: 15px;">
-          <a *ngIf="job.sourceUrl" [href]="job.sourceUrl" target="_blank" class="apply-btn" style="background: #eff6ff; color: #2563eb; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; display: inline-block; font-size: 0.9rem; border: 1px solid #bfdbfe; transition: all 0.2s;">
+          <a *ngIf="job.sourceUrl" [href]="job.sourceUrl" target="_blank" class="apply-btn-link">
             🔗 Xem bài đăng gốc
           </a>
         </div>
       </div>
-      
+
       <div class="card-footer">
         <div class="date-badge">
           <i class="icon">📅</i> Đăng ngày: {{ job.postedDate | date:'dd/MM/yyyy' }}
@@ -137,4 +266,5 @@
       </div>
     </div>
   </div>
+
 </div>

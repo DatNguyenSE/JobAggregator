@@ -29,10 +29,6 @@ namespace JobAggregator.BusinessLogic.Services.Scrapers
                 {
                     targetUrl = $"https://www.chotot.com/tags/toan-quoc/viec-lam-{keyword.Replace(" ", "-")}";
                 }
-                else if (_source == "facebook")
-                {
-                    targetUrl = "https://www.facebook.com/groups/tuyendungvieclamparttime"; 
-                }
 
                 if (string.IsNullOrEmpty(targetUrl)) return "[]";
 
@@ -42,9 +38,6 @@ namespace JobAggregator.BusinessLogic.Services.Scrapers
                 if (_source == "chotot") {
                     crawlGlobs = new[] { new { glob = "https://www.chotot.com/**/*.htm*" } };
                     linkSelector = "a[href*='.htm']";
-                } else if (_source == "facebook") {
-                    crawlGlobs = new[] { new { glob = "https://www.facebook.com/groups/*/posts/*" }, new { glob = "https://www.facebook.com/groups/*/permalink/*" } };
-                    linkSelector = "a[href*='/posts/'], a[href*='/permalink/']";
                 }
 
                 var requestBody = new

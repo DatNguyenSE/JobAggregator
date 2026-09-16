@@ -5,6 +5,8 @@ namespace JobAggregator.BusinessLogic.DTOs
     public class JobPostDto
     {
         public Guid Id { get; set; }
+        public Guid? FacebookGroupId { get; set; }
+        public string[] Roles { get; set; } = Array.Empty<string>();
         public string Title { get; set; } = string.Empty;
         public string? SalaryInfo { get; set; } 
         public string? Requirements { get; set; }

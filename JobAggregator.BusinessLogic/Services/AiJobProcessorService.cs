@@ -1,6 +1,7 @@
 using System;
-using System.IO;
-using System.Net.Http;
+using Microsoft.EntityFrameworkCore;
+
+
 using System.Text.Json;
 using System.Threading.Tasks;
 using Amazon.ApiGatewayManagementApi;
@@ -8,9 +9,9 @@ using Amazon.ApiGatewayManagementApi.Model;
 using JobAggregator.BusinessLogic.DTOs;
 using JobAggregator.BusinessLogic.Mappings;
 using JobAggregator.DataAccess.Repositories;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Processing;
-using SixLabors.ImageSharp.Formats.Jpeg;
+
+
+
 using JobAggregator.DataAccess.Entities;
 
 namespace JobAggregator.BusinessLogic.Services
@@ -23,14 +24,16 @@ namespace JobAggregator.BusinessLogic.Services
     public class AiJobProcessorService : IAiJobProcessorService
     {
         private readonly IJobRepository _jobRepository;
-        private readonly HttpClient _httpClient;
+        private readonly JobAggregator.DataAccess.Data.AppDbContext _db;
+
         private readonly AmazonApiGatewayManagementApiClient _apiGatewayClient;
         private readonly Amazon.BedrockRuntime.IAmazonBedrockRuntime _bedrockClient;
 
-        public AiJobProcessorService(IJobRepository jobRepository)
+        public AiJobProcessorService(IJobRepository jobRepository, JobAggregator.DataAccess.Data.AppDbContext db)
         {
             _jobRepository = jobRepository;
-            _httpClient = new HttpClient();
+            _db = db;
+
             
             var endpoint = Environment.GetEnvironmentVariable("WEBSOCKET_ENDPOINT") ?? "";
             var config = new AmazonApiGatewayManagementApiConfig { ServiceURL = endpoint };
@@ -52,7 +55,15 @@ namespace JobAggregator.BusinessLogic.Services
             
 
                 // Dữ liệu chưa theo format chung: gọi Bedrock để trích xuất thành JSON List<JobPostDto>.
-            if (!isValidJobArray)
+            using var sourceDocument = JsonDocument.Parse(rawJsonData.TrimStart().StartsWith("{") ? rawJsonData : "null");
+            if (sourceDocument.RootElement.ValueKind == JsonValueKind.Object &&
+                sourceDocument.RootElement.TryGetProperty("Kind", out var kind) && kind.GetString() == "facebook-group-posts")
+            {
+                var batch = JsonSerializer.Deserialize<FacebookPostBatch>(rawJsonData)!;
+                await ProcessFacebookAsync(batch, criteria, scrapedAt ?? DateTime.UtcNow);
+                return;
+            }
+            else if (!isValidJobArray)
             {
                 int maxJobs = criteria.MaxJobs > 0 ? criteria.MaxJobs : 5;
                 Console.WriteLine($"[Luồng 3] Dữ liệu thô không đúng chuẩn Job. Gọi AWS Bedrock (MaxJobs={maxJobs})...");
@@ -79,6 +90,13 @@ namespace JobAggregator.BusinessLogic.Services
             
             if (jobDtos != null)
             {
+                var run = criteria.RequestId.HasValue ? await _db.JobSearchRequests.FindAsync(criteria.RequestId.Value) : null;
+                var receipts = run == null ? new Dictionary<string, string>() :
+                    JsonSerializer.Deserialize<Dictionary<string, string>>(run.ProcessingResultsJson) ?? new();
+                if (run != null) { run.Status = "processing"; run.FetchedCount = jobDtos.Select(j => j.ExternalId).Distinct().Count(); }
+                var ids = jobDtos.Select(j => j.ExternalId).ToArray();
+                var existingIds = (await _db.JobPosts.AsNoTracking().Where(j => j.Platform == "vieclam24h" && ids.Contains(j.ExternalId))
+                    .Select(j => j.ExternalId).ToListAsync()).ToHashSet();
                 // SearchKeyword lưu dấu vết tiêu chí sinh ra lô job; lọc địa điểm thực tế dựa trên JobLocations.
                 // Nếu chưa có thì tạo mới; nếu có thì cập nhật metadata sau khi lưu các JobPost.
                 var keywordEntity = await _jobRepository.GetSearchKeywordAsync(criteria.Keyword, criteria.Location, criteria.JobType);
@@ -102,14 +120,23 @@ namespace JobAggregator.BusinessLogic.Services
                     // BƯỚC 6: Gộp trùng theo Platform + ExternalId, chuyển mỗi DTO thành entity rồi gọi repository lưu DB.
                     foreach (var jobDto in jobDtos.GroupBy(j => (j.Platform, j.ExternalId)).Select(g => g.Last()))
                     {
+                        if (receipts.ContainsKey(jobDto.ExternalId)) continue;
                         var jobEntity = jobDto.ToEntity(keywordEntity.Id);
                         jobEntity.LastScrapedAt = scrapedAt ?? DateTime.UtcNow;
                         await _jobRepository.AddJobPostAsync(jobEntity);
+                        receipts[jobDto.ExternalId] = existingIds.Contains(jobDto.ExternalId) ? "updated" : "inserted";
+                        if (run != null)
+                        {
+                            run.ProcessingResultsJson = JsonSerializer.Serialize(receipts);
+                            run.InsertedCount = receipts.Count(x => x.Value == "inserted");
+                            run.UpdatedCount = receipts.Count(x => x.Value == "updated");
+                            await _db.SaveChangesAsync();
+                        }
                     }
                     
                     keywordEntity.LastScrapedAt = DateTime.UtcNow;
-                    keywordEntity.TotalJobsFound = (await _jobRepository.GetJobsByCriteriaAsync(criteria.Keyword,
-                        criteria.Location, criteria.JobType, int.MaxValue)).Count();
+                    keywordEntity.TotalJobsFound = await JobSearchQuery.Apply(_db.JobPosts, criteria.Keyword,
+                        criteria.Location, criteria.JobType, null, criteria.Sources).CountAsync();
                     await _jobRepository.UpdateSearchKeywordAsync(keywordEntity);
                     
                     await _jobRepository.SaveChangesAsync();
@@ -120,6 +147,7 @@ namespace JobAggregator.BusinessLogic.Services
                     Console.WriteLine($"[Scraping] Không có job nào được tìm thấy cho '{criteria.Keyword}'.");
                 }
                 
+                await _db.SaveChangesAsync();
                 var connectionIds = await _jobRepository.GetAllConnectionIdsAsync();
                 
                 var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -152,6 +180,74 @@ namespace JobAggregator.BusinessLogic.Services
                         Console.WriteLine($"[Broadcast Error] Lỗi khi gửi cho {connId}: {ex.Message}");
                     }
                 }
+            }
+        }
+
+        private async Task ProcessFacebookAsync(FacebookPostBatch batch, SearchCriteriaDto criteria, DateTime observedAt)
+        {
+            var run = criteria.RequestId.HasValue ? await _db.JobSearchRequests.FindAsync(criteria.RequestId.Value) : null;
+            if (run == null) throw new InvalidOperationException("Facebook processing requires a persisted scrape run.");
+            var receipts = JsonSerializer.Deserialize<Dictionary<string, string>>(run.ProcessingResultsJson) ?? new();
+            var posts = batch.Posts.GroupBy(p => p.ExternalId).Select(g => g.Last()).ToList();
+            var ids = posts.Select(p => p.ExternalId).ToArray();
+            // Indexed, bounded lookup; never load all historical jobs into memory.
+            var existing = await _db.JobPosts.AsNoTracking().Where(j => j.Platform == "facebook" && ids.Contains(j.ExternalId))
+                .Select(j => new { j.ExternalId, j.ContentHash, j.LastScrapedAt }).ToDictionaryAsync(j => j.ExternalId);
+            var keyword = await _jobRepository.GetSearchKeywordAsync("", "", "");
+            if (keyword == null)
+            {
+                keyword = new SearchKeyword { Id = Guid.NewGuid(), Keyword = "", Location = "", JobType = "", LastScrapedAt = observedAt };
+                await _jobRepository.AddSearchKeywordAsync(keyword);
+                await _jobRepository.SaveChangesAsync();
+            }
+            run.Status = "processing"; run.FetchedCount = posts.Count;
+            await _db.SaveChangesAsync();
+            foreach (var post in posts)
+            {
+                if (receipts.TryGetValue(post.ExternalId, out var receipt) && receipt != "failed") continue;
+                var hash = FacebookContentHash.Compute(post);
+                existing.TryGetValue(post.ExternalId, out var old);
+                if (old != null && (old.ContentHash == hash || old.LastScrapedAt > observedAt))
+                {
+                    await _db.JobPosts.Where(j => j.Platform == "facebook" && j.ExternalId == post.ExternalId &&
+                        (j.LastScrapedAt == null || j.LastScrapedAt <= observedAt))
+                        .ExecuteUpdateAsync(update => update.SetProperty(j => j.LastScrapedAt, observedAt)
+                            .SetProperty(j => j.FacebookGroupId, criteria.FacebookGroupId));
+                    receipts[post.ExternalId] = "unchanged";
+                }
+                else
+                {
+                    List<JobPostDto>? extracted = null;
+                    try
+                    {
+                        extracted = await new FacebookJobExtractor(_bedrockClient).ExtractAsync(
+                            new FacebookPostBatch { Posts = new() { post } }, new SearchCriteriaDto { MaxJobs = 1 });
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[FacebookExtractionFailed] Run={run.Id}, Post={post.ExternalId}, Type={ex.GetType().Name}");
+                        receipts[post.ExternalId] = "failed";
+                    }
+                    if (extracted != null)
+                    {
+                        if (extracted.Count == 0) receipts[post.ExternalId] = "rejected";
+                        else
+                        {
+                            var entity = extracted[0].ToEntity(keyword.Id);
+                            entity.FacebookGroupId = criteria.FacebookGroupId;
+                            entity.ContentHash = hash; entity.LastScrapedAt = observedAt;
+                            await _jobRepository.AddJobPostAsync(entity);
+                            receipts[post.ExternalId] = old == null ? "inserted" : "updated";
+                        }
+                    }
+                }
+                run.ProcessingResultsJson = JsonSerializer.Serialize(receipts);
+                run.InsertedCount = receipts.Count(x => x.Value == "inserted");
+                run.UpdatedCount = receipts.Count(x => x.Value == "updated");
+                run.UnchangedCount = receipts.Count(x => x.Value == "unchanged");
+                run.RejectedCount = receipts.Count(x => x.Value == "rejected");
+                run.FailedCount = receipts.Count(x => x.Value == "failed");
+                await _db.SaveChangesAsync();
             }
         }
 
@@ -244,39 +340,5 @@ namespace JobAggregator.BusinessLogic.Services
             return "[]";
         }
 
-        private async Task<string> CallBedrockMultimodalAsync(string text, string base64Image)
-        {
-            // TODO: Tạo JSON Payload định dạng Anthropic Claude 3 (Multimodal) truyền cả text và base64 image array.
-            return "{\"Title\":\"Lập trình viên .NET\",\"SalaryInfo\":\"2000$\",\"Platform\":\"Facebook\",\"ExternalId\":\"FB_123\"}";
-        }
-
-        private async Task<string> DownloadAndCompressImageAsync(string imageUrl)
-        {
-            // Tải ảnh từ URL
-            var imageBytes = await _httpClient.GetByteArrayAsync(imageUrl);
-
-            // Xử lý bằng SixLabors.ImageSharp
-            using var image = Image.Load(imageBytes);
-            
-            // Giảm kích thước ảnh xuống tối đa 1024x1024 để hạn chế tốn Token của Claude Vision
-            int maxWidth = 1024;
-            int maxHeight = 1024;
-            
-            if (image.Width > maxWidth || image.Height > maxHeight)
-            {
-                image.Mutate(x => x.Resize(new ResizeOptions
-                {
-                    Mode = ResizeMode.Max,
-                    Size = new Size(maxWidth, maxHeight)
-                }));
-            }
-
-            // Nén ảnh sang JPEG chất lượng 80%
-            using var ms = new MemoryStream();
-            await image.SaveAsJpegAsync(ms, new JpegEncoder { Quality = 80 });
-            
-            // Claude 3 API nhận dữ liệu ảnh dưới dạng chuỗi Base64
-            return Convert.ToBase64String(ms.ToArray());
-        }
     }
 }

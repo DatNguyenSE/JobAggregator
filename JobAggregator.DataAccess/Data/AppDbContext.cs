@@ -9,6 +9,7 @@ namespace JobAggregator.DataAccess.Data
         {
         }
 
+        public DbSet<FacebookGroup> FacebookGroups { get; set; }
         public DbSet<SearchKeyword> SearchKeywords { get; set; }
         public DbSet<JobSearchRequest> JobSearchRequests { get; set; }
         public DbSet<JobPost> JobPosts { get; set; }
@@ -18,6 +19,18 @@ namespace JobAggregator.DataAccess.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+            // Retain the existing request table for a non-destructive upgrade; it now holds shared scrape runs.
+            modelBuilder.Entity<FacebookGroup>().HasIndex(g => g.CanonicalUrl).IsUnique();
+            modelBuilder.Entity<FacebookGroup>().HasIndex(g => g.ExternalGroupId).IsUnique();
+            modelBuilder.Entity<JobPost>().HasOne(j => j.FacebookGroup).WithMany()
+                .HasForeignKey(j => j.FacebookGroupId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<JobPost>().HasIndex(j => new { j.FacebookGroupId, j.PostedDate, j.Id });
+            modelBuilder.Entity<JobPost>().HasIndex(j => new { j.Platform, j.PostedDate, j.Id });
+            modelBuilder.Entity<JobSearchRequest>().HasOne(r => r.FacebookGroup).WithMany()
+                .HasForeignKey(r => r.FacebookGroupId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<JobSearchRequest>().HasIndex(r => new { r.OwnerId, r.CreatedAt });
+            modelBuilder.Entity<JobSearchRequest>().HasIndex(r => new { r.OwnerId, r.IdempotencyKey }).IsUnique();
+            modelBuilder.Entity<JobSearchRequest>().HasIndex(r => new { r.ScopeKey, r.CreatedAt });
 
             // Cấu hình bảng WebSocketConnections
             modelBuilder.Entity<WebSocketConnection>()
